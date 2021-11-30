@@ -1,0 +1,13 @@
+{
+    "name": "EasyFarm",
+    "version": "1.0.0",
+    "license": "GPL-v3",
+    "dependencies": {
+        "@openzeppelin/contracts": "^4.3.2",
+        "@openzeppelin/test-helpers": "^0.5.15",
+        "@truffle/hdwallet-provider": "^1.5.1",
+        "eth-gas-reporter": "^0.2.22",
+        "truffle-contract-size": "^2.0.1",
+        "truffle-plugin-verify": "^0.5.16"
+    }
+}
