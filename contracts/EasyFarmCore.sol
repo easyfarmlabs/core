@@ -83,18 +83,12 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
     }
 
     modifier onlyAuth() {
-        require(
-            msg.sender == devAddr || msg.sender == marketAddr,
-            "permission denied"
-        );
+        require(msg.sender == devAddr || msg.sender == marketAddr, "permission denied");
         _;
     }
 
     modifier validatePid(uint256 _pid) {
-        require(
-            _pid < poolInfo.length,
-            "pid not exist"
-        );
+        require(_pid < poolInfo.length, "pid not exist");
         _;
     }
 
@@ -176,18 +170,11 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_userAddr];
 
         if (pool.depositToken != ETH_ADDR) {
-            IERC20(pool.depositToken).safeTransferFrom(
-                _userAddr,
-                address(this),
-                _amount
-            );
+            IERC20(pool.depositToken).safeTransferFrom(_userAddr, address(this), _amount);
         }
-
         pool.totalDeposited = pool.totalDeposited.add(_amount);
         user.amount = user.amount.add(_amount);
-        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(
-            BASE_NUMBER
-        );
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
 
         // earn
         earn(_pid);
@@ -210,22 +197,15 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         }
         pool.totalDeposited = pool.totalDeposited.sub(_amount);
         user.amount = user.amount.sub(_amount);
-        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(
-            BASE_NUMBER
-        );
-
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
         // withdraw
         uint256 bal = IERC20(pool.depositToken).balanceOf(address(this));
         if(bal < _amount){
             address strategyAddr = tokenStrategy[_pid];
             if (strategyAddr != address(0)) {
-                IEasyFarmStrategy(strategyAddr).withdraw(
-                    pool.depositToken,
-                    _amount.sub(bal)
-                );
+                IEasyFarmStrategy(strategyAddr).withdraw(pool.depositToken, _amount.sub(bal));
             }
         }
-
         // transfer
         if (pool.depositToken != ETH_ADDR) {
             IERC20(pool.depositToken).safeTransfer(_userAddr, _amount);
@@ -271,11 +251,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
             return;
         }
 
-        uint256 incReward = _incReward(
-            pool.lastUpdateBlock,
-            block.number,
-            pool.rewardPerBlock
-        );
+        uint256 incReward = _incReward(pool.lastUpdateBlock, block.number, pool.rewardPerBlock);
         eft.mint(address(this), incReward);
 
         // dev & market reward
@@ -285,23 +261,13 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         uint256 marketReward = incReward.mul(marketPercents).div(BASE_NUMBER);
         eft.mint(marketAddr, marketReward);
 
-        pool.accTokenPerShare = pool.accTokenPerShare.add(
-            incReward.mul(BASE_NUMBER).div(pool.totalDeposited)
-        );
+        pool.accTokenPerShare = pool.accTokenPerShare.add(incReward.mul(BASE_NUMBER).div(pool.totalDeposited));
         pool.lastUpdateBlock = block.number;
 
         emit UpdatePool(incReward, devReward, marketReward);
     }
 
-    function pendingAll(address _userAddr)
-        public
-        view
-        returns (
-            uint256 totalPending,
-            uint256 totalReleased,
-            uint256 totalLocked
-        )
-    {
+    function pendingAll(address _userAddr) public view returns (uint256 totalPending, uint256 totalReleased, uint256 totalLocked) {
         for (uint256 i = 0; i < poolInfo.length; i++) {
             (uint256 pending, uint256 released, uint256 locked) = pendingReward(i, _userAddr);
             totalPending = totalPending.add(pending);
@@ -324,17 +290,9 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
             PoolInfo storage pool = poolInfo[_pid];
             if (user.amount > 0) {
                 uint256 accTokenPerShare = pool.accTokenPerShare;
-                uint256 incReward = _incReward(
-                    pool.lastUpdateBlock,
-                    block.number,
-                    pool.rewardPerBlock
-                );
-                accTokenPerShare = accTokenPerShare.add(
-                    incReward.mul(BASE_NUMBER).div(pool.totalDeposited)
-                );
-                pending = user.amount.mul(accTokenPerShare).div(BASE_NUMBER).sub(
-                    user.rewardDebt
-                );
+                uint256 incReward = _incReward(pool.lastUpdateBlock, block.number, pool.rewardPerBlock);
+                accTokenPerShare = accTokenPerShare.add(incReward.mul(BASE_NUMBER).div(pool.totalDeposited));
+                pending = user.amount.mul(accTokenPerShare).div(BASE_NUMBER).sub(user.rewardDebt);
             }
 
             locked = user.locked;
@@ -403,10 +361,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         address _tokenAddr,
         address _strategyAddr
     ) external onlyOwner {
-        require(
-            poolInfo[_pid].depositToken == _tokenAddr,
-            "token err"
-        );
+        require(poolInfo[_pid].depositToken == _tokenAddr, "token err");
         address _oldStrategy = tokenStrategy[_pid];
         if (_oldStrategy != address(0)) {
             IEasyFarmStrategy(_oldStrategy).withdrawAll(_tokenAddr);
