@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-v3
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.10;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -19,6 +19,8 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
     uint256 public constant BASE_NUMBER = 1e18;
 
     EasyFarmToken public eft;
+
+    address public gover;
 
     address public devAddr;
     uint256 public devPercents;
@@ -55,17 +57,14 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
     mapping(uint256 => address) public tokenStrategy; // pid=>strategy
 
     event Deposit(address user, address token, uint256 amount);
-
     event Withdraw(address user, address token, uint256 amount);
-
     event Claim(address user, uint256 pending, uint256 released);
-
     event Earn(address token, address strategy, uint256 amount);
-
     event UpdatePool( uint256 incReward, uint256 devReward, uint256 marketReward);
 
     constructor(
         EasyFarmToken _eft,
+        address _gover,
         address _devAddr,
         address _marketAddr,
         uint256 _devPercents,
@@ -74,6 +73,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         uint256 _lockBlock
     ) {
         eft = _eft;
+        gover = _gover;
         devAddr = _devAddr;
         marketAddr = _marketAddr;
         devPercents = _devPercents;
@@ -87,6 +87,11 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         _;
     }
 
+    modifier onlyGov() {
+        require(msg.sender == gover, "not gover");
+        _;
+    }
+
     modifier validatePid(uint256 _pid) {
         require(_pid < poolInfo.length, "pid not exist");
         _;
@@ -94,11 +99,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
 
     receive() external payable {}
 
-    function add(
-        address _depositToken,
-        uint256 _rewardPerBlock,
-        uint256 _earnThreshold
-    ) public onlyOwner {
+    function add(address _depositToken, uint256 _rewardPerBlock, uint256 _earnThreshold) public onlyOwner {
         uint256 _lastUpdateBlock = block.number > startBlock ? block.number : startBlock;
         poolInfo.push(
             PoolInfo({
@@ -143,55 +144,39 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         (uint256 pending, uint256 released, ) = pendingReward(_pid, _userAddr);
         UserInfo storage user = userInfo[_pid][_userAddr];
         PoolInfo storage pool = poolInfo[_pid];
-
         user.locked = user.locked.add(pending).sub(released);
         user.lastRewardBlock = block.number;
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
         if(released > 0){
             _safeEFTTransfer(_userAddr, released);
         }
-
         address strategyAddr = tokenStrategy[_pid];
         if(strategyAddr != address(0)){
             IEasyFarmStrategy(strategyAddr).claim(pool.depositToken);
         }
-
         emit Claim(_userAddr, pending, released);
     }
 
-    function _deposit(
-        address _userAddr,
-        uint256 _pid,
-        uint256 _amount
-    ) internal validatePid(_pid) {
+    function _deposit(address _userAddr, uint256 _pid, uint256 _amount) internal validatePid(_pid) {
         _claim(_userAddr, _pid);
 
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_userAddr];
-
         if (pool.depositToken != ETH_ADDR) {
             IERC20(pool.depositToken).safeTransferFrom(_userAddr, address(this), _amount);
         }
         pool.totalDeposited = pool.totalDeposited.add(_amount);
         user.amount = user.amount.add(_amount);
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
-
         // earn
         earn(_pid);
-
         emit Deposit(_userAddr, pool.depositToken, _amount);
     }
 
-    function _withdraw(
-        address _userAddr,
-        uint256 _pid,
-        uint256 _amount
-    ) internal validatePid(_pid) {
+    function _withdraw(address _userAddr, uint256 _pid, uint256 _amount) internal validatePid(_pid) {
         _claim(_userAddr, _pid);
-
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_userAddr];
-
         if(_amount > user.amount){
             _amount = user.amount;
         }
@@ -212,7 +197,6 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         } else {
             payable(_userAddr).transfer(_amount);
         }
-
         emit Withdraw(_userAddr, pool.depositToken, _amount);
     }
 
@@ -234,7 +218,6 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
                     IEasyFarmStrategy(strategyAddr).deposit(pool.depositToken);
                 }
             }
-
             emit Earn(pool.depositToken, strategyAddr, bal);
         }
     
@@ -245,29 +228,25 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         if (block.number <= pool.lastUpdateBlock) {
             return;
         }
-
         if (pool.totalDeposited == 0) {
             pool.lastUpdateBlock = block.number;
             return;
         }
-
         uint256 incReward = _incReward(pool.lastUpdateBlock, block.number, pool.rewardPerBlock);
         eft.mint(address(this), incReward);
-
         // dev & market reward
         uint256 devReward = incReward.mul(devPercents).div(BASE_NUMBER);
         eft.mint(devAddr, devReward);
-
         uint256 marketReward = incReward.mul(marketPercents).div(BASE_NUMBER);
         eft.mint(marketAddr, marketReward);
-
-        pool.accTokenPerShare = pool.accTokenPerShare.add(incReward.mul(BASE_NUMBER).div(pool.totalDeposited));
+        pool.accTokenPerShare = pool.accTokenPerShare.add(
+            incReward.mul(BASE_NUMBER).div(pool.totalDeposited)
+        );
         pool.lastUpdateBlock = block.number;
-
         emit UpdatePool(incReward, devReward, marketReward);
     }
 
-    function pendingAll(address _userAddr) public view returns (uint256 totalPending, uint256 totalReleased, uint256 totalLocked) {
+    function pendingAll(address _userAddr) public view returns (uint256 totalPending, uint256 totalReleased, uint256 totalLocked){
         for (uint256 i = 0; i < poolInfo.length; i++) {
             (uint256 pending, uint256 released, uint256 locked) = pendingReward(i, _userAddr);
             totalPending = totalPending.add(pending);
@@ -276,21 +255,13 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         }
     }
 
-    function pendingReward(uint256 _pid, address _userAddr)
-        public
-        view
-        returns (
-            uint256 pending,
-            uint256 released,
-            uint256 locked
-        )
-    {
+    function pendingReward(uint256 _pid, address _userAddr) public view returns (uint256 pending, uint256 released, uint256 locked) {
         UserInfo storage user = userInfo[_pid][_userAddr];
         if(user.lastRewardBlock > 0){
             PoolInfo storage pool = poolInfo[_pid];
             if (user.amount > 0) {
                 uint256 accTokenPerShare = pool.accTokenPerShare;
-                uint256 incReward = _incReward(pool.lastUpdateBlock, block.number, pool.rewardPerBlock);
+                uint256 incReward = _incReward(pool.lastUpdateBlock, block.number,  pool.rewardPerBlock);
                 accTokenPerShare = accTokenPerShare.add(incReward.mul(BASE_NUMBER).div(pool.totalDeposited));
                 pending = user.amount.mul(accTokenPerShare).div(BASE_NUMBER).sub(user.rewardDebt);
             }
@@ -308,11 +279,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
     }
 
     // total reward from start to now
-    function _incReward(
-        uint256 _fromBlock,
-        uint256 _endBlock,
-        uint256 _rewardPerBlock
-    ) internal view returns (uint256 reward) {
+    function _incReward(uint256 _fromBlock, uint256 _endBlock, uint256 _rewardPerBlock) internal view returns (uint256 reward) {
         uint256 fromBlock;
         if (_endBlock <= startBlock) {
             return 0;
@@ -340,10 +307,6 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         return userInfo[_pid][_user];
     }
 
-    function getEFTAddr() external view returns (address) {
-        return address(eft);
-    }
-
     function getTotalRewardPerBlock() external view returns (uint256) {
         return totalReardPerBlock;
     }
@@ -356,25 +319,16 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         lockBlock = _lockBlock;
     }
 
-    function setStrategy(
-        uint256 _pid,
-        address _tokenAddr,
-        address _strategyAddr
-    ) external onlyOwner {
+    function setStrategy(uint256 _pid, address _tokenAddr, address _strategyAddr) external onlyOwner {
         require(poolInfo[_pid].depositToken == _tokenAddr, "token err");
         address _oldStrategy = tokenStrategy[_pid];
         if (_oldStrategy != address(0)) {
             IEasyFarmStrategy(_oldStrategy).withdrawAll(_tokenAddr);
         }
-
         tokenStrategy[_pid] = _strategyAddr;
     }
 
-    function setRewardPerBlock(
-        uint256 _pid,
-        uint256 _rewardPerBlock,
-        bool _withUpdate
-    ) public onlyOwner {
+    function setRewardPerBlock(uint256 _pid, uint256 _rewardPerBlock, bool _withUpdate) public onlyGov {
         if (_withUpdate) {
             updatePool(_pid);
         }
@@ -384,17 +338,21 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         totalReardPerBlock = totalReardPerBlock.add(pool.rewardPerBlock);
     }
 
-    function setEarnThreshold(uint256 _pid, uint256 _earnThreshold) external onlyOwner {
+    function setEarnThreshold(uint256 _pid, uint256 _earnThreshold) external onlyGov {
         PoolInfo storage pool = poolInfo[_pid];
         pool.earnThreshold = _earnThreshold;
     }
 
-    function setDevPercents(uint256 _devPercents) public onlyOwner {
+    function setDevPercents(uint256 _devPercents) public onlyGov {
         devPercents = _devPercents;
     }
 
-    function setMarketPercents(uint256 _marketPercents) public onlyOwner {
+    function setMarketPercents(uint256 _marketPercents) public onlyGov {
         marketPercents = _marketPercents;
+    }
+
+    function setGover(address _gover) external onlyGov {
+        gover = _gover;
     }
 
     function setDev(address _devAddr) public onlyAuth {
