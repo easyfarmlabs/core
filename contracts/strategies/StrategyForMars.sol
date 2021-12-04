@@ -9,7 +9,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "../EasyFarmToken.sol";
 
 import "../interface/IEasyFarmStrategy.sol";
-import "../interface/IEasyFarmCore.sol";
 import "../interface/IMars.sol";
 import "../interface/ISwapRouter.sol";
 
@@ -95,8 +94,15 @@ contract StrategyForMars is Ownable, IEasyFarmStrategy {
         claim(_tokenAddr);
     }
 
+    function emergencyWithdraw(address _tokenAddr) external override onlyCore {
+        IMars(farmPool).emergencyWithdraw(tokenPid[_tokenAddr]);
+        uint256 bal = IERC20(_tokenAddr).balanceOf(address(this));
+        IERC20(_tokenAddr).safeTransfer(easyFarmCore, bal);
+        claim(_tokenAddr);
+    }
+
     function claim(address) public override {
-        (, uint256 claimable) = IMars(farmPool).getVestingAmount();
+        (, uint256 claimable) = IMars(claimPool).getVestingAmount();
         if (claimable > claimThreshold) {
             IMars(claimPool).claim();
             doSwap();

@@ -6,4 +6,5 @@ interface IEasyFarmStrategy {
     function withdraw(address _tokenAddr, uint256 _amount) external;
     function claim(address _tokenAddr) external;
     function withdrawAll(address _tokenAddr) external;
+    function emergencyWithdraw(address _tokenAddr) external;
 }
