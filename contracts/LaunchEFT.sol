@@ -123,8 +123,10 @@ contract LaunchEFT is Ownable {
         require(user.supported > 0, "not support");
         (uint256 released,) = pending(msg.sender);
         user.lastClaim = block.number;
-        user.claimDebt = user.claimDebt.add(released);
-        IERC20(eftAddr).safeTransfer(msg.sender, released);
+        if(released > 0){
+            user.claimDebt = user.claimDebt.add(released);
+            IERC20(eftAddr).safeTransfer(msg.sender, released);
+        }
         emit Claim(msg.sender, released);
     }
 

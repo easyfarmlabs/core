@@ -56,11 +56,15 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
 
     mapping(uint256 => address) public tokenStrategy; // pid=>strategy
 
-    event Deposit(address user, address token, uint256 amount);
-    event Withdraw(address user, address token, uint256 amount);
+    event Add(address depositToken, uint256 lastUpdateBlock, uint256 totalReardPerBlock);
+    event Deposit(address user, uint256 pid, uint256 amount);
+    event Withdraw(address user, uint256 pid, uint256 amount);
     event Claim(address user, uint256 pending, uint256 released);
     event Earn(address token, address strategy, uint256 amount);
-    event UpdatePool( uint256 incReward, uint256 devReward, uint256 marketReward);
+    event UpdatePool(uint256 incReward, uint256 devReward, uint256 marketReward);
+    event SetStrategy(uint256 pid, address tokenAddr, address oldStrategy, address strategyAddr);
+    event EmergencyWithdrawStrategy(uint256 pid, address user, address strategyAddr);
+    event SetEarnThreshold(uint256 pid, uint256 earnThreshold);
 
     constructor(
         EasyFarmToken _eft,
@@ -112,6 +116,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
             })
         );
         totalReardPerBlock = totalReardPerBlock.add(_rewardPerBlock);
+        emit Add(_depositToken, _lastUpdateBlock, totalReardPerBlock);
     }
 
     function deposit(uint256 _pid, uint256 _amount) external payable nonReentrant {
@@ -159,45 +164,49 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
 
     function _deposit(address _userAddr, uint256 _pid, uint256 _amount) internal validatePid(_pid) {
         _claim(_userAddr, _pid);
-
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][_userAddr];
-        if (pool.depositToken != ETH_ADDR) {
-            IERC20(pool.depositToken).safeTransferFrom(_userAddr, address(this), _amount);
+        if(_amount > 0){
+            PoolInfo storage pool = poolInfo[_pid];
+            UserInfo storage user = userInfo[_pid][_userAddr];
+            if (pool.depositToken != ETH_ADDR) {
+                IERC20(pool.depositToken).safeTransferFrom(_userAddr, address(this), _amount);
+            }
+            pool.totalDeposited = pool.totalDeposited.add(_amount);
+            user.amount = user.amount.add(_amount);
+            user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
+            // earn
+            earn(_pid);
         }
-        pool.totalDeposited = pool.totalDeposited.add(_amount);
-        user.amount = user.amount.add(_amount);
-        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
-        // earn
-        earn(_pid);
-        emit Deposit(_userAddr, pool.depositToken, _amount);
+        emit Deposit(_userAddr, _pid, _amount);
     }
 
     function _withdraw(address _userAddr, uint256 _pid, uint256 _amount) internal validatePid(_pid) {
         _claim(_userAddr, _pid);
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][_userAddr];
-        if(_amount > user.amount){
-            _amount = user.amount;
-        }
-        pool.totalDeposited = pool.totalDeposited.sub(_amount);
-        user.amount = user.amount.sub(_amount);
-        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
-        // withdraw
-        uint256 bal = IERC20(pool.depositToken).balanceOf(address(this));
-        if(bal < _amount){
-            address strategyAddr = tokenStrategy[_pid];
-            if (strategyAddr != address(0)) {
-                IEasyFarmStrategy(strategyAddr).withdraw(pool.depositToken, _amount.sub(bal));
+        if(_amount > 0){
+            PoolInfo storage pool = poolInfo[_pid];
+            UserInfo storage user = userInfo[_pid][_userAddr];
+            if(_amount > user.amount){
+                _amount = user.amount;
+            }
+            pool.totalDeposited = pool.totalDeposited.sub(_amount);
+            user.amount = user.amount.sub(_amount);
+            user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
+            // withdraw
+            uint256 bal = IERC20(pool.depositToken).balanceOf(address(this));
+            if(bal < _amount){
+                address strategyAddr = tokenStrategy[_pid];
+                if (strategyAddr != address(0)) {
+                    IEasyFarmStrategy(strategyAddr).withdraw(pool.depositToken, _amount.sub(bal));
+                }
+            }
+            // transfer
+            if (pool.depositToken != ETH_ADDR) {
+                IERC20(pool.depositToken).safeTransfer(_userAddr, _amount);
+            } else {
+                payable(_userAddr).transfer(_amount);
             }
         }
-        // transfer
-        if (pool.depositToken != ETH_ADDR) {
-            IERC20(pool.depositToken).safeTransfer(_userAddr, _amount);
-        } else {
-            payable(_userAddr).transfer(_amount);
-        }
-        emit Withdraw(_userAddr, pool.depositToken, _amount);
+        
+        emit Withdraw(_userAddr, _pid, _amount);
     }
 
     function earn(uint256 _pid) public {
@@ -326,6 +335,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
             IEasyFarmStrategy(_oldStrategy).withdrawAll(_tokenAddr);
         }
         tokenStrategy[_pid] = _strategyAddr;
+        emit SetStrategy(_pid, _tokenAddr, _oldStrategy, _strategyAddr);
     }
 
     function emergencyWithdrawStrategy(uint256 _pid) external onlyOwner {
@@ -333,6 +343,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
         require(strategyAddr != address(0), "no strategy");
         IEasyFarmStrategy(strategyAddr).emergencyWithdraw(poolInfo[_pid].depositToken);
         tokenStrategy[_pid] = address(0);
+        emit EmergencyWithdrawStrategy(_pid, msg.sender, strategyAddr);
     }
 
     function setRewardPerBlock(uint256 _pid, uint256 _rewardPerBlock, bool _withUpdate) external onlyGov {
@@ -348,6 +359,7 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
     function setEarnThreshold(uint256 _pid, uint256 _earnThreshold) external onlyGov {
         PoolInfo storage pool = poolInfo[_pid];
         pool.earnThreshold = _earnThreshold;
+        emit SetEarnThreshold(_pid, _earnThreshold);
     }
 
     function setDevPercents(uint256 _devPercents) external onlyGov {
