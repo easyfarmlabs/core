@@ -191,7 +191,13 @@ contract EasyFarmCore is Ownable, ReentrancyGuard {
             user.amount = user.amount.sub(_amount);
             user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(BASE_NUMBER);
             // withdraw
-            uint256 bal = IERC20(pool.depositToken).balanceOf(address(this));
+            uint256 bal;
+            if(pool.depositToken != ETH_ADDR){
+                bal = IERC20(pool.depositToken).balanceOf(address(this));
+            }else{
+                bal = address(this).balance;
+            }
+            
             if(bal < _amount){
                 address strategyAddr = tokenStrategy[_pid];
                 if (strategyAddr != address(0)) {
